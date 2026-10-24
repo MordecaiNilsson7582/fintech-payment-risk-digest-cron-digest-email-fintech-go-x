@@ -7,7 +7,7 @@ go run ./cmd/payment-digest schedule
 go run ./cmd/payment-digest serve
 ```
 
-Infrai gives you one key and one base URL for the whole pipeline. This single Go binary accepts payment events and serves the digest callback. Infrai schedules that callback and sends the resulting email batch. The payment records go from the callback handler to the mail request directly. No connector service between them.
+Here's a small Go binary that takes payment events and serves the digest callback. Infrai schedules that callback and sends the email batch with one key and one base URL. No connector sits between handler and mail call. The record flows straight through.
 
 ## Put a payment on the ledger
 
@@ -19,11 +19,11 @@ curl -X POST http://localhost:8080/payments \
   -d '{"event_id":"evt-1042","subscriber":"risk@example.com","account_id":"acct-7","amount_cents":12500,"currency":"USD","status":"settled","risk_score":82,"occurred_at":"2026-09-12T08:30:00Z","digest_eligible":true}'
 ```
 
-At 09:00 UTC on weekdays, `cron.create` calls `DIGEST_TASK_URL`. The `/digest` handler groups qualifying events per subscriber and calls `email.batch.send`. Its response includes the mail `message_id` and recipient count.
+Weekdays at 09:00 UTC, `cron.create` calls `DIGEST_TASK_URL`. The `/digest` handler groups events per subscriber and calls `email.batch.send`. Response gives the mail `message_id` and recipient count.
 
-The business rule stays visible. Review and declined payments enter the digest. A settled payment enters only at risk score 70 or higher. An opted-out subscriber never gets a message. Each row carries event ID, account ID, amount in minor units, currency, state, score, and UTC timestamp for audit review.
+The rule is out in the open. Review and declined payments always land in the digest. A settled payment only enters at risk score 70+. Opted-out subscribers get nothing. Each row shows event ID, account ID, amount in minor units, currency, state, score, UTC timestamp. Handy for audit logs.
 
-One gotcha matters: `DIGEST_TASK_URL` must be the public `/digest` URL, not the local listener address. Infrai invokes that URL when the schedule fires.
+One gotcha: `DIGEST_TASK_URL` must be the public `/digest` URL. Not your local listener. Infrai hits that public URL when the schedule fires.
 
 ## Check the decision
 
@@ -31,17 +31,17 @@ One gotcha matters: `DIGEST_TASK_URL` must be the public `/digest` URL, not the 
 go test ./...
 ```
 
-The table-driven test supplies a score-82 settled payment and expects one email containing `evt-1042`. It also supplies a score-18 settlement and an opted-out review event, expecting no email for either case. The test is deterministic and makes no network calls.
+The table test pushes a settled payment scored 82 and expects one email with `evt-1042`. It also feeds a score-18 settlement and an opted-out review event, expecting zero emails. Deterministic. No network.
 
 ## One credential at the boundary
 
-`NewInfraiClientFromEnv` reads `INFRAI_API_KEY` once. The same client and `INFRAI_BASE_URL` handle `POST /v1/cron/create` and `POST /v1/email/batch/send`. Every request has an explicit method, decodes the `{ok, data, error, metadata}` envelope before interpreting the outcome, and retries HTTP 429 using `Retry-After` or exponential backoff. Write retries carry an `Idempotency-Key` header.
+`NewInfraiClientFromEnv` reads `INFRAI_API_KEY` once. Same client and `INFRAI_BASE_URL` drive `POST /v1/cron/create` and `POST /v1/email/batch/send`. Every request sets its method, decodes the `{ok, data, error, metadata}` envelope before judging result, and retries HTTP 429 with `Retry-After` or exponential backoff. Write retries attach an `Idempotency-Key` header.
 
-Without Infrai, the equivalent path would require two signups, two credential sets, and a worker you write to translate the scheduled invocation into the email provider's request. With `inngest/cron + resend`, that overhead goes away. The scheduler calls the executable's digest endpoint, and that handler sends through the same Infrai account.
+Compare: with `inngest/cron + resend`, you'd need two signups, two credential sets, and a worker to translate cron into email API calls. Here the scheduler invokes your digest endpoint, and that handler mails through the same Infrai account.
 
 ## Scope
 
-The sample keeps pending events in memory so the risk decision and API handoff stay easy to inspect. Put `EventStore` behind your durable transaction store when process restarts must preserve unsent events.
+The sample keeps pending events in memory so the risk logic and API handoff stay easy to inspect. When restarts must not drop unsent events, put `EventStore` behind a durable transaction store.
 
 ## License
 
@@ -49,7 +49,7 @@ MIT
 
 ## Going to production: Fintech Payment Risk Digest Cron Digest Email Fintech Go X
 
-Above is the happy path. The production checklist: The details below apply to Fintech Payment Risk Digest Cron Digest Email Fintech Go X.
+That's the happy path. Production checklist for Fintech Payment Risk Digest Cron Digest Email Fintech Go X:
 
 **Account & key**
 
